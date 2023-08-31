@@ -8,8 +8,6 @@ import numpy as np
 from sympy import lambdify
 import sympy as sp
 import pysr
-pysr.install()
-pysr.julia_helpers.init_julia()
 from pysr import PySRRegressor
 
 import torch
@@ -28,32 +26,6 @@ gaussian = lambda x: torch.exp(- (x**2 / 0.5**2) / 2)
 # soft clip params from Chakazul ;)
 soft_clip =lambda x: 1. / (1. + torch.exp(-4 * (x - 0.5))) 
 
-
-def plot_compare(grid_0, grid_1, my_cmap=plt.get_cmap("magma"), titles=None, vmin=0.0, vmax=1):
-
-    global subplot_0
-    global subplot_1
-
-    if type(grid_0) is torch.tensor:
-        grid_0 = grid_0.detach().numpy()
-    if type(grid_1) is torch.tensor:
-        grid_1 = grid_1.detach().numpy()
-        
-    if titles == None:
-        titles = ["CA grid time t", "Neighborhood", "Update", "CA grid time t+1"]
-
-    fig = plt.figure(figsize=(12,6), facecolor="white")
-    plt.subplot(121)
-    subplot_0 = plt.imshow(grid_0, cmap=my_cmap, vmin=vmin, vmax=vmax, interpolation="nearest") 
-    plt.title(titles[0], fontsize=18)
-
-    plt.subplot(122)
-    subplot_1 = plt.imshow(grid_1, cmap=my_cmap, vmin=vmin, vmax=vmax, interpolation="nearest")
-    plt.title(titles[1], fontsize=18)
-
-    plt.tight_layout()
-
-    return fig 
 
 # Graph NN CA functions are based on code from [here](https://github.com/riveSunder/SortaSota/tree/gh-pages/life_like_graphs)
 def get_ca_mlp(birth=[3], survival=[2,3]):
@@ -84,8 +56,7 @@ def get_ca_mlp(birth=[3], survival=[2,3]):
 
 def get_graph_params():
     """ 
-    return an MLP forward pass function encoding Life-like CA rules
-    default to Conway's Game of Life (B3/S23)
+    return random MLP parameters for a node/cell update function
     """ 
     bh = -torch.rand(18,1) * 18
     wy = torch.rand(1,18)
@@ -253,3 +224,49 @@ def get_gnn_loss(adjacency_matrix, x, tgt_mlp, bh, wy, wch, whn):
 
     return loss
                
+
+def get_edge_fn_neighbors(adjacency_matrix, x, edge_fn):
+
+    num_cells = reduce(lambda a,b: a*b, x.shape)
+    my_neighbors = torch.zeros(x.shape[0], x.shape[1])
+
+    for adj_x in range(num_cells):
+        for adj_y in range(num_cells):
+
+            rec_x = adj_x // x.shape[1]
+
+            send_x = adj_y // x.shape[1]
+
+            if adjacency_matrix[adj_x, adj_y]:
+                my_neighbors[rec_x] += edge_fn(x[send_x].reshape(1,1)).squeeze()
+
+    return my_neighbors
+
+def full_gfnn(adjacency_matrix, x, edge_fn, node_fn):
+
+    neighbors = get_edge_fn_neighbors(adjacency_matrix, x, edge_fn)
+
+    #tgt_mlp(((a_matrix @ nodes_0) + 9 * nodes_0).T).T
+    #new_x = params_mlp((((neighbors) + 9 * x).T), bh, wy).T
+    new_x = node_fn((neighbors) + 9 * x)
+    #params_mlp(((   (x_nodebbb) + 9 * x).T), bh, wy).T
+    return new_x
+
+def full_hybrid_gn(adjacency_matrix, x, edge_fn, node_fn, bh, wy):
+
+    neighbors = get_edge_fn_neighbors(adjacency_matrix, x, edge_fn)
+
+    #tgt_mlp(((a_matrix @ nodes_0) + 9 * nodes_0).T).T
+    new_x = params_mlp((((neighbors) + 9 * x).T), bh, wy).T
+    #new_x = node_fn(neighbors + 9 * x)
+
+    return new_x
+
+def get_gfnn_loss(adjacency_matrix, x, tgt_mlp, edge_fn, node_fn):
+
+    tgt = tgt_mlp(((adjacency_matrix @ x) + 9 * x).T).T
+    pred = full_gfnn(adjacency_matrix, x, edge_fn, node_fn)
+
+    loss = torch.abs((tgt - pred)**2).mean()
+
+    return loss
