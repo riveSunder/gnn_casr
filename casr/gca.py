@@ -23,7 +23,7 @@ from functools import reduce
 
 # simple custom activation functions
 gaussian = lambda x: torch.exp(- (x**2 / 0.5**2) / 2)  
-# soft clip params from Chakazul ;)
+# soft clip params from Chakazul 
 soft_clip =lambda x: 1. / (1. + torch.exp(-4 * (x - 0.5))) 
 
 
@@ -47,7 +47,6 @@ def get_ca_mlp(birth=[3], survival=[2,3]):
     def mlp(x):
 
         hidden = gaussian(torch.matmul(wh, x) + bh)
-        #out = np.round(np.dot(wy, hidden))
         out = soft_clip(torch.matmul(wy, hidden))
 
         return out 
